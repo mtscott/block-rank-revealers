@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blockrr"
+version = "1.0.0"
+description = "Rank revealers under a column-block constraint: greedy block pivoting (Algorithm 2, variants a, b, c), baselines, and the paper's experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Jamie Haddock" }, { name = "Riley Murray" }, { name = "Mitchell T. Scott" }]
+dependencies = ["numpy>=1.24", "scipy>=1.10"]
+
+[project.optional-dependencies]
+experiments = ["matplotlib>=3.7"]
+data = ["netCDF4>=1.6"]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+include = ["blockrr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

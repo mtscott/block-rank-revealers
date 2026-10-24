@@ -1,0 +1,17 @@
+\begin{tabular}{@{}l r r@{}}
+\toprule
+inequality & checks & largest violation\\
+\midrule
+\exEqSwap: $\mathbb V\mathrm{ol}(\mathbf A_S)\le\mathbb V\mathrm{ol}(\mathbf A_T)\,\mathbb V\mathrm{ol}(\mathbf A_{S\setminus T})$, all $S,T$ & 268,092 & $1.8\cdot10^{-14}$\\
+\exEqViaVq & 1,482 & $8.9\cdot10^{-16}$\\
+\exEqViaSingles & 1,482 & 0\\
+\exEqViaPhi{} (Theorem~\exThmSummary) & 1,482 & $1.3\cdot10^{-15}$\\
+Corollary~\exCorExplicit(i) & 1,482 & 0\\
+Corollary~\exCorExplicit(ii), when $R\|\mathbf X\|_2\ge1$ & 1,361 & 0\\
+Corollary~\exCorExplicit(iii) & 1,182 & $1.1\cdot10^{-16}$\\
+Corollary~\exCorExplicit(iv) & 1,482 & $1.3\cdot10^{-15}$\\
+$\overline V_q\le\prod_{j\le q}v_{[j]}$ & 1,482 & 0\\
+$\overline V_q\le\Phi_r(R\mathbf X)$ & 1,482 & $6.7\cdot10^{-16}$\\
+greedy guarantee $\mathbb V\mathrm{ol}(\mathbf A_G)\ge\overline V_k^{\,1-(1-1/k)^k}$ & 1,482 & 0\\
+\bottomrule
+\end{tabular}

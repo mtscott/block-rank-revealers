@@ -1,0 +1,21 @@
+\begin{tabular}{@{}l l rrr rrr@{}}
+\toprule
+ & & \multicolumn{3}{c}{trap family} & \multicolumn{3}{c@{}}{devil's stairs}\\
+\cmidrule(lr){3-5}\cmidrule(l){6-8}
+method & $\mathbf M$ & $\mathbf A$ & $d=50$ & $d=80$ & $\mathbf A$ & $d=80$ & $d=128$\\
+\midrule
+Alg.~\exAlgGreedy${}={}$Alg.~\exAlgTensor\,(a)--(c) & -- & 11.88 & 4.22 & 5.48 & 0.56 & 0.59\,{\scriptsize(1.2)} & 0.58\,{\scriptsize(1.2)}\\
+\addlinespace[2pt]
+\multicolumn{8}{@{}l}{$\star_{\mathbf M}$-QR factorizations:}\\
+\quad unpivoted~\cite{KilmerMartinPerrone2008}$^{\dagger}$ & any & 11.88 & 11.88 & 11.88 & 2.51 & 2.51 & 2.51\\
+\quad first-slice~\cite{Hao2013} & $\mathbf I$ & 11.88 & 5.91 & 6.09 & 2.22 & 2.22\,{\scriptsize(3.4)} & 2.14\,{\scriptsize(3.1)}\\
+ & DFT, DCT, Haar & 0.13 & 4.70 & 3.38 & 2.65 & 2.91\,{\scriptsize(3.6)} & 2.98\,{\scriptsize(3.6)}\\
+\quad tube-norm & $\mathbf I$ & 11.88 & 7.19 & 6.70 & 2.07 & 1.83\,{\scriptsize(2.9)} & 1.77\,{\scriptsize(2.9)}\\
+ & DFT & 11.88 & 6.07 & 4.71 & 1.96 & 2.32\,{\scriptsize(3.2)} & 2.30\,{\scriptsize(3.2)}\\
+ & DCT & 11.88 & 6.40 & 5.07 & 1.83 & 2.21\,{\scriptsize(3.5)} & 2.15\,{\scriptsize(3.2)}\\
+ & Haar & 11.88 & 4.96 & 3.90 & 1.79 & 2.16\,{\scriptsize(2.9)} & 2.14\,{\scriptsize(2.9)}\\
+\addlinespace[2pt]
+\texttt{dgeqp3}, induced & -- & 11.88 & 9.00 & 9.26 & 3.48 & 2.38\,{\scriptsize(3.8)} & 2.37\,{\scriptsize(3.5)}\\
+random (median) & -- & 11.88 & 11.88 & 11.88 & 2.36 & 2.36 & 2.36\\
+\bottomrule
+\end{tabular}
