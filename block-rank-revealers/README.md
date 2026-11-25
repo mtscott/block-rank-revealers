@@ -36,7 +36,9 @@ give three instantiations:
 | `"b"` | [**U**, **V**] (SVD) | {t, …, n} | diagonal | one **M** = **W**<sub>j</sub><sup>⊤</sup> per tubal column |
 | `"c"` | [**U**, **V**] (SVD) | [n] | no structure | a single **M** = **W**<sup>⊤</sup> |
 
-All three pick the same blocks as Algorithm 1 (Proposition 4 of the paper).
+All three pick the same blocks as Algorithm 1. The paper's Table 2 letters them differently:
+`"c"` is its variant (a), one adaptive **M**; `"a"` is (b), facewise; and `"b"` is (c),
+adaptive **M**<sub>j</sub> per tubal column.
 
 ```python
 import numpy as np
@@ -87,6 +89,7 @@ python experiments/extras.py         --npz data/perdigao_iop.npz   # results/ext
 python experiments/tensor_sketch.py                                # results/tensor_sketch.json
 python experiments/make_figures.py                                 # figures/*.png and *.pdf
 python experiments/make_tables.py                                  # tables/*.tex
+python experiments/fig_starm_checks.py                             # figures/fig_starm_checks.png and .pdf
 ```
 
 On a virtual machine with two 2.1 GHz Xeon cores the sequence takes about 45 minutes:
@@ -94,7 +97,7 @@ On a virtual machine with two 2.1 GHz Xeon cores the sequence takes about 45 min
 `tiebreaks.py`, 10 for `analysis.py` and 2 for `tensor_sketch.py`.
 
 Random seeds are fixed in the scripts. `results/` holds the output of our runs, so the
-last two commands work without the data. Block greedy is Algorithm 2: the benchmark runs
+last three commands work without the data. Block greedy is Algorithm 2: the benchmark runs
 all three variants on every problem, checks that they select blocks of the same volume at
 every budget, and checks them against Algorithm 1. The Perdigão columns are standardized,
 so the first step of every method that ranks columns or blocks by a norm (`dgeqp3`,
@@ -108,6 +111,7 @@ and the paper reports the median, with the best run counted in the best known vo
 | `figures/fig_toy_gaps.png`, `tables/losses.tex` | block greedy, the column methods and the pivoted ⋆<sub>M</sub>-QR factorizations (**M** = I, DFT, DCT) on block Kahan, with the loss of the natural order (blocks 1, …, k) dashed, and the devil's stairs (and the Perdigão columns of the table) |
 | `figures/fig_perdigao_gaps.png`, `figures/fig_perdigao_map.png` | the same methods on the Perdigão tower problems |
 | `figures/fig_bayes_bounds.png`, `tables/bounds.tex` | the lower bounds against the worst case, Bayesian problem |
+| `figures/fig_starm_checks.png` | the three instantiations of Algorithm 2 (lettered as in the paper's Table 2) on the 18 × 6 × 3 example of `experiments/tensorqr_notebook.ipynb`: residual of the factorization identity and loss of orthogonality for every tubal column, and the structure of R̃ in (a) and (c) |
 | `tables/sketch.tex` | block greedy on a sketch of the Perdigão problems |
 | `tables/sketch_trap.tex` | Example 2.1 on Gaussian sketches with 12 to 768 rows (no longer in the paper) |
 | `tables/tensor.tex` | Algorithm 2 (a)–(c) and the ⋆<sub>M</sub>-QR methods on the trap family and the devil's stairs, with and without sketching |
