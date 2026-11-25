@@ -19,7 +19,7 @@ experiments section.
 git clone https://github.com/<user>/block-rank-revealers.git
 cd block-rank-revealers
 pip install -e ".[experiments]"      # numpy, scipy; matplotlib for the figures
-python -m pytest -q                  # 55 tests, a few seconds
+python -m pytest -q                  # 65 tests, a few seconds
 ```
 
 Python 3.10 or later. The paper's runs used Python 3.13, NumPy 2.5.3 and SciPy 1.18.1.
@@ -67,7 +67,7 @@ written as stated in the paper, one tensor operation per line, rather than for s
 | `blockrr.core` | volumes (`log_vol_S`), `exhaustive` optimum and worst selection, `induced_block_order` |
 | `blockrr.starm_qr.starm_qr` | pivoted ⋆<sub>M</sub>-QR of the literature: unpivoted, first-slice, tube-norm; **M** = I, DFT, DCT, Haar |
 | `blockrr.column.get(name)` | column-pivoted QR: `businger_golub`, `geqp3`, `hqrrp`, `cqrrpt`, `srrqr`, `rand_srrqr` |
-| `blockrr.problems` | Example 2.1, the ⌈k/b⌉-trap family, the block devil's stairs |
+| `blockrr.problems` | Example 2.1, the ⌈k/b⌉-trap family, block Kahan, the block devil's stairs |
 | `blockrr.perdigao` | the Perdigão tower data: extraction and the three tower problems |
 | `blockrr.sketching` | Gaussian, sparse sign and SRTT sketches |
 
@@ -81,34 +81,41 @@ data; [`data/README.md`](data/README.md) says where to get them and how to extra
 pip install -e ".[experiments,data]"
 python -m blockrr.perdigao data/nc data/perdigao_iop.npz --heights 2m 10m
 python experiments/run_benchmarks.py --npz data/perdigao_iop.npz   # results/benchmarks.json
+python experiments/tiebreaks.py      --npz data/perdigao_iop.npz   # results/tiebreaks.json
 python experiments/analysis.py       --npz data/perdigao_iop.npz   # results/analysis.json
 python experiments/extras.py         --npz data/perdigao_iop.npz   # results/extras.json
 python experiments/tensor_sketch.py                                # results/tensor_sketch.json
-python experiments/make_figures.py                                 # figures/*.pdf
+python experiments/make_figures.py                                 # figures/*.png and *.pdf
 python experiments/make_tables.py                                  # tables/*.tex
 ```
 
 On a virtual machine with two 2.1 GHz Xeon cores the sequence takes about 45 minutes:
-30 for `run_benchmarks.py` (mostly the column methods on the 8-channel problem), 10 for
-`analysis.py` and 2 for `tensor_sketch.py`.
+30 for `run_benchmarks.py` (mostly the column methods on the 8-channel problem), 2 for
+`tiebreaks.py`, 10 for `analysis.py` and 2 for `tensor_sketch.py`.
 
 Random seeds are fixed in the scripts. `results/` holds the output of our runs, so the
 last two commands work without the data. Block greedy is Algorithm 2: the benchmark runs
 all three variants on every problem, checks that they select blocks of the same volume at
-every budget, and checks them against Algorithm 1.
+every budget, and checks them against Algorithm 1. The Perdigão columns are standardized,
+so the first step of every method that ranks columns or blocks by a norm (`dgeqp3`,
+Businger–Golub, sRRQR, first-slice ⋆_M-QR with M = I, tube-norm ⋆_M-QR) is an exact tie
+that rounding decides; `tiebreaks.py` runs these methods from every possible first pick,
+and the paper reports the median, with the best run counted in the best known volume.
 
 | output | in the paper |
 |---|---|
-| `figures/fig_sharp_limits.pdf` | loss of block greedy on Example 2.1 and the trap family, with and without sketching |
-| `figures/fig_toy_gaps.pdf`, `tables/losses.tex` | all methods on the trap family and the devil's stairs (and the Perdigão columns of the table) |
-| `figures/fig_perdigao_gaps.pdf`, `figures/fig_perdigao_map.pdf` | the Perdigão tower problems |
-| `figures/fig_bayes_bounds.pdf`, `tables/bounds.tex` | the lower bounds against the worst case, Bayesian problem |
-| `tables/sketch.tex`, `tables/sketch_trap.tex` | block greedy on a sketch |
-| `figures/fig_tensor_methods.pdf`, `tables/tensor.tex` | Algorithm 2 (a)–(c) and the ⋆<sub>M</sub>-QR methods, with and without sketching |
+| `figures/fig_sharp_limits.png` | loss of block greedy on the trap family and on Example 2.1, with and without the prior |
+| `figures/fig_toy_gaps.png`, `tables/losses.tex` | block greedy, the column methods and the pivoted ⋆<sub>M</sub>-QR factorizations (**M** = I, DFT, DCT) on block Kahan, with the loss of the natural order (blocks 1, …, k) dashed, and the devil's stairs (and the Perdigão columns of the table) |
+| `figures/fig_perdigao_gaps.png`, `figures/fig_perdigao_map.png` | the same methods on the Perdigão tower problems |
+| `figures/fig_bayes_bounds.png`, `tables/bounds.tex` | the lower bounds against the worst case, Bayesian problem |
+| `tables/sketch.tex` | block greedy on a sketch of the Perdigão problems |
+| `tables/sketch_trap.tex` | Example 2.1 on Gaussian sketches with 12 to 768 rows (no longer in the paper) |
+| `tables/tensor.tex` | Algorithm 2 (a)–(c) and the ⋆<sub>M</sub>-QR methods on the trap family and the devil's stairs, with and without sketching |
 | `tables/problems.tex`, `tables/verify.tex`, `tables/rr.tex`, `tables/alg2.tex` | appendix: problems, random verification, rank-revealing factors, Algorithm 2 in floating point |
 
 The tables are LaTeX fragments that use the paper's cross-reference macros
-(`\exAlgGreedy`, `\exEqViaVq`, …). The figures use Latin Modern when a TeX installation
+(`\exAlgGreedy`, `\exEqViaVq`, …). The paper includes the figures as 600 dpi PNGs;
+each is also written as a vector PDF. They use Latin Modern when a TeX installation
 provides it.
 
 ## Layout

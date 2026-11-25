@@ -62,10 +62,11 @@ def log_vol_S(A: np.ndarray, S: Iterable[int], b: int) -> float:
     return log_vol(A[:, cols_of(S, b)])
 
 
-def augment(X: np.ndarray, R: float) -> np.ndarray:
-    """Bayesian design matrix A = [R X; I_{nb}], so log Vol(A_S) = 1/2 log det(I + R^2 X_S^T X_S)."""
+def augment(X: np.ndarray, alpha: float) -> np.ndarray:
+    """Bayesian design matrix A = [alpha X; I_{nb}], so
+    log Vol(A_S) = 1/2 log det(I + alpha^2 X_S^T X_S)."""
     N = X.shape[1]
-    return np.vstack([R * X, np.eye(N)])
+    return np.vstack([alpha * X, np.eye(N)])
 
 
 def trajectory(A: np.ndarray, order: list[int], b: int, kmax: Optional[int] = None) -> list[float]:

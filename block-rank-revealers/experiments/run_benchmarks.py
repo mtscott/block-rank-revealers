@@ -12,7 +12,8 @@ family sweeps.
 Block greedy is Algorithm 2, run with each of its variants (a), (b), (c); the three must
 select blocks of the same volume at every k (Proposition 4 of the paper), and are checked
 against Algorithm 1.  A column method selects a block the first time one of its columns
-is pivoted (``core.induced_block_order``).
+is pivoted (``core.induced_block_order``).  The pivoted *_M-QR factorizations (first-slice
+and tube-norm pivoting, M = I, DFT, DCT) order the tubal columns, that is the blocks.
 """
 from __future__ import annotations
 
@@ -29,13 +30,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import blockrr  # noqa: E402
-from blockrr import core, problems as P  # noqa: E402
+from blockrr import core, problems as P, starm_qr as SM  # noqa: E402
 from blockrr.column import RANDOMIZED, get  # noqa: E402
 from blockrr.perdigao import MEANS, TURB, load  # noqa: E402
 
 GREEDY = "Block greedy (Alg. 2)"
 COLUMN_METHODS = ["geqp3", "businger_golub", "hqrrp", "cqrrpt"]   # nested
 PER_K_COLUMN = ["srrqr", "rand_srrqr"]                             # need k
+STARM = [(rule, tn) for rule in ("first_slice", "tube_norm") for tn in ("I", "DFT", "DCT")]
 N_SEEDS = 10
 
 
@@ -126,6 +128,13 @@ def run_problem(name, A, b, K=None, *, desc="", exhaustive_limit=200_000, tall=N
         else:
             add(label, runs[0], nested=False, family="column")
 
+    # pivoted *_M-QR factorizations, on R0: left multiplication by Q0^T changes neither
+    # the facewise residual norms nor the facewise QR, so the pivots are those for A
+    for rule, tn in STARM:
+        order = [int(j) for j in SM.starm_qr(R0, b, transform_name=tn, rule=rule, k=K)["order"][:K]]
+        add(f"{rule}|{tn}", [lv(order[:k]) for k in ks], nested=True, family="tensor",
+            note=f"{rule.replace('_', '-')} *_M-QR, M = {tn}")
+
     # references
     rng = np.random.default_rng(123)
     rnd = np.array([[core.random_selection(R0, b, k, rng) for k in ks] for _ in range(200)])
@@ -198,8 +207,8 @@ def perdigao_problems(npz):
                           "u'w', w'tc'. " + basetxt(P2))
     out.append(first8(pr, P2["names"]))
     Xw = P1["A"] / np.sqrt(P1["m"])
-    pr = run_problem("Perdigão: Bayesian D-optimal (R=3)", core.augment(Xw, 3.0), P1["b"], n - 1,
-                     desc="log Vol [R X; I], X = data / sqrt(m) so that X^T X is the correlation matrix "
+    pr = run_problem("Perdigão: Bayesian D-optimal (alpha=3)", core.augment(Xw, 3.0), P1["b"], n - 1,
+                     desc="log Vol [alpha X; I], X = data / sqrt(m) so that X^T X is the correlation matrix "
                           "of the channels of problem (i).", tall=True)
     out.append(first8(pr, P1["names"]))
     return out
@@ -216,6 +225,10 @@ def main(argv=None):
     probs.append(run_problem("Trap family (k=8, b=4)", X, 4, 9,
                              desc="ceil(k/b)-trap family: 2 trap blocks poison all 8 good blocks; "
                                   "eps = 0.5, delta = 1e-2"))
+    probs.append(run_problem("Block Kahan (c=1/4)", P.block_kahan(16, 4, rows=256), 4, 15,
+                             desc="Kahan matrix of order 64 with c = 1/4 and MATLAB's diagonal perturbation "
+                                  "25 eps (N - i + 1), 192 zero rows appended; consecutive columns form "
+                                  "16 blocks of 4"))
     probs.append(run_problem("Block devil's staircase", P.block_devil_stairs(3000, 16, 4, rng=7), 4, 15,
                              desc="3000 x 64, 16 blocks of 4, five-step spectrum dropping 1e-2 per step"))
     if args.npz:

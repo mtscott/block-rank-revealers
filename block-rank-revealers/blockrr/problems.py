@@ -1,9 +1,9 @@
 """Synthetic test problems: Example 2.1 of the paper, the ceil(k/b)-trap family that
-generalizes it, and a block devil's-stairs matrix."""
+generalizes it, the block Kahan matrix, and a block devil's-stairs matrix."""
 
 from __future__ import annotations
 
-from math import ceil
+from math import ceil, log10, sqrt
 
 import numpy as np
 
@@ -84,6 +84,61 @@ def trap_family(k: int, b: int, eps: float = 0.5, delta: float = 1e-2) -> tuple[
     Xp = np.concatenate([X[:, j * b:(j + 1) * b] for j in perm], axis=1)
     good = [perm.index(i) for i in range(k)]
     return Xp, sorted(good)
+
+
+def kahan(N: int, c: float, *, pert: float = 25.0) -> np.ndarray:
+    """Kahan matrix K = S (I - c U) of order N.
+
+    S = diag(1, s, ..., s^(N-1)) with s = sqrt(1 - c^2), and U is strictly upper triangular
+    with unit entries.  Every column has unit norm, and after any number of columns taken in
+    their natural order the remaining residuals have equal norm, so column pivoting keeps
+    that order.  As in MATLAB's gallery('kahan', N, acos(c), pert), the diagonal is perturbed
+    by pert * eps * (N - i + 1), i = 1..N, which makes the natural order the pivot order.
+    """
+    s = sqrt(1.0 - c * c)
+    d = s ** np.arange(N)
+    K = np.triu(-c * np.outer(d, np.ones(N)), 1)
+    K[np.diag_indices(N)] = d + pert * np.finfo(float).eps * np.arange(N, 0, -1)
+    return K
+
+
+def block_kahan(n: int, b: int, *, c: float | None = None, pert: float = 25.0,
+                rows: int | None = None) -> np.ndarray:
+    """Kahan matrix of order N = nb whose consecutive columns form n blocks of width b.
+
+    The default c = 1/b maximizes ``kahan_shift_rate``: the column methods then select
+    blocks 1..k (the natural order), while the best k blocks are 2..k+1.  ``rows`` > N
+    appends zero rows (so that methods requiring a tall matrix apply); volumes are unchanged.
+    """
+    N = n * b
+    K = kahan(N, 1.0 / b if c is None else c, pert=pert)
+    if rows is not None and rows > N:
+        K = np.vstack([K, np.zeros((rows - N, N))])
+    return K
+
+
+def kahan_shift_log10_ratio(b: int, c: float, k: int) -> float:
+    """log10 Vol(blocks 2..k+1) / Vol(blocks 1..k) of the unperturbed block Kahan matrix.
+
+    With q = (1+c)/s, exactly
+        k b^2 log10 s + 1/2 log10(1 + (1 - s^(2b)) s^(-2b) sum_{l<kb} q^(2l)),
+    since the columns of blocks 2..k+1 agree in the first b rows (a rank-one part) and form
+    a Kahan-like triangle below them.
+    """
+    s = sqrt(1.0 - c * c)
+    q2 = ((1.0 + c) / s) ** 2
+    geom = (q2 ** (k * b) - 1.0) / (q2 - 1.0)
+    return k * b * b * log10(s) + 0.5 * log10(1.0 + (1.0 - s ** (2 * b)) * s ** (-2 * b) * geom)
+
+
+def kahan_shift_rate(b: int, c: float) -> float:
+    """Growth per block of ``kahan_shift_log10_ratio``: b log10(1+c) + b(b-1) log10 s.
+
+    It is largest at c = 1/b (about 0.22 for every b) and negative for large c, where the
+    natural order is optimal.
+    """
+    s = sqrt(1.0 - c * c)
+    return b * log10(1.0 + c) + b * (b - 1) * log10(s)
 
 
 def block_devil_stairs(m: int, n: int, b: int, *, n_steps: int = 5,

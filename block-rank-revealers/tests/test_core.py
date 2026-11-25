@@ -41,11 +41,11 @@ def test_exhaustive_matches_brute_force():
 def test_augmented_volume_is_the_information_gain():
     rng = np.random.default_rng(3)
     X = rng.standard_normal((5, 8))
-    R = 2.0
-    A = core.augment(X, R)
+    alpha = 2.0
+    A = core.augment(X, alpha)
     S = [1, 3]
     XS = X[:, core.cols_of(S, 2)]
-    expected = 0.5 * np.linalg.slogdet(np.eye(4) + R**2 * XS.T @ XS)[1]
+    expected = 0.5 * np.linalg.slogdet(np.eye(4) + alpha**2 * XS.T @ XS)[1]
     assert np.isclose(core.log_vol_S(A, S, 2), expected)
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The star_M experiments of the paper (Section 4.7) and the sketched Example 2.1 (Figure 1).
+"""The star_M experiments of the paper (Section 4.7), and the sketched Example 2.1 (no longer in the paper).
 
 1. Tensor methods on the trap family and the block devil's stairs: the three
    instantiations of Algorithm 2 (QR/[n], SVD/{t..n}, SVD/[n]) and the pivoted

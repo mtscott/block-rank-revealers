@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/
+
+# the Perdigão data are not redistributed; see data/README.md
+data/*.npz
+data/*.nc
+data/nc/
+
+# logs written by the experiment scripts
+results/*.log

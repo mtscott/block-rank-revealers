@@ -21,9 +21,10 @@ TAB = ROOT / "tables"
 TAB.mkdir(parents=True, exist_ok=True)
 LN10 = math.log(10.0)
 
-PROBS = ["trap", "devil", "pmeans", "pturb", "pbayes"]
-PROB_HEAD = [r"trap", r"stairs", r"(i)", r"(ii)", r"(iii)"]
+PROBS = ["kahan", "devil", "pmeans", "pturb", "pbayes"]          # the losses table (Figure 2 + Perdigao)
+PROB_HEAD = [r"Kahan", r"stairs", r"(i)", r"(ii)", r"(iii)"]
 N_SYNTH = 2                       # the first N_SYNTH problems are synthetic
+ALL_PROBS = ["trap", "kahan", "devil", "pmeans", "pturb", "pbayes"]  # the problems table
 METHODS = [
     ("Block greedy (Alg. 2)", r"block greedy (Alg.~\exAlgGreedy)"),
     ("Businger-Golub", r"Businger--Golub"),
@@ -32,6 +33,13 @@ METHODS = [
     ("HQRRP", r"HQRRP, median"),
     ("CQRRPT", r"CQRRPT, median"),
     ("Randomized sRRQR", r"randomized sRRQR, median"),
+]
+STARM_METHODS = [   # pivoted *_M-QR; first-slice with M = DFT and DCT select the same blocks
+    ("first_slice|I", r"\quad first-slice, $\mathbf M=\mathbf I$"),
+    ("first_slice|DFT", r"\quad first-slice, $\mathbf M=$ DFT, DCT"),
+    ("tube_norm|I", r"\quad tube-norm, $\mathbf M=\mathbf I$"),
+    ("tube_norm|DFT", r"\quad tube-norm, $\mathbf M=$ DFT"),
+    ("tube_norm|DCT", r"\quad tube-norm, $\mathbf M=$ DCT"),
 ]
 
 
@@ -67,22 +75,35 @@ def table_losses(D):
     lines.append(rf"\cmidrule(r{{1.6em}}){{2-{1 + ns}}}\cmidrule(l){{{2 + ns}-{1 + ns + nr}}}")
     lines.append(r"method & " + " & ".join(PROB_HEAD) + r"\\")
     lines.append(r"\midrule")
+    for p in PROBS:
+        m = R[p]["methods"]
+        assert np.allclose(m["first_slice|DFT"]["gap"], m["first_slice|DCT"]["gap"], atol=1e-12), p
+    # bold: the lowest loss in each column, over the method rows
+    rows = list(METHODS) + list(STARM_METHODS)
+    low = {p: min(round(R[p]["methods"][k]["max_gap"], 2) for k, _ in rows if k in R[p]["methods"]) for p in PROBS}
+
+    def cell(p, key):
+        m = R[p]["methods"].get(key)
+        if m is None:
+            return "--"
+        s = f2(m["max_gap"])
+        return rf"\textbf{{{s}}}" if round(m["max_gap"], 2) == low[p] else s
+
+    def worst(key, field, label):
+        """randomized: the worst seed; tied on Perdigao (tiebreaks.py): the worst first pick"""
+        cells = [("(" + f2(R[p]["methods"][key][field], 1) + ")") if field in R[p]["methods"].get(key, {})
+                 else "--" for p in PROBS]
+        return [label + " & " + " & ".join(cells) + r"\\"] if any(c != "--" for c in cells) else []
+
     for key, lab in METHODS:
-        cells, seeds, randomized = [], [], False
-        for p in PROBS:
-            m = R[p]["methods"].get(key)
-            if m is None:
-                cells.append("--"); seeds.append("--")
-                continue
-            cells.append(f2(m["max_gap"]))
-            if "max_gap_worst_seed" in m:
-                randomized = True
-                seeds.append("(" + f2(m["max_gap_worst_seed"], 1) + ")")
-            else:
-                seeds.append("")
-        lines.append(lab + " & " + " & ".join(cells) + r"\\")
-        if randomized:
-            lines.append(r"\quad worst seed & " + " & ".join(seeds) + r"\\")
+        lines.append(lab + " & " + " & ".join(cell(p, key) for p in PROBS) + r"\\")
+        lines += worst(key, "max_gap_worst_seed", r"\quad worst seed")
+        lines += worst(key, "max_gap_worst_tiebreak", r"\quad worst tie-break")
+    lines.append(r"\addlinespace[2pt]")
+    lines.append(rf"\multicolumn{{{1 + len(PROBS)}}}{{@{{}}l}}{{pivoted $\star_{{\mathbf M}}$-QR factorizations:}}\\")
+    for key, lab in STARM_METHODS:
+        lines.append(lab + " & " + " & ".join(cell(p, key) for p in PROBS) + r"\\")
+        lines += worst(key, "max_gap_worst_tiebreak", r"\quad\quad worst tie-break")
     lines.append(r"\midrule")
     cells = [f2(R[p]["random_max_median_gap"], 1) for p in PROBS]
     lines.append(r"random $k$-set (median) & " + " & ".join(cells) + r"\\")
@@ -234,10 +255,10 @@ def table_verify(D):
     V = D["verify"]
     names = [("eq8", r"\exEqSwap: $\mathbb V\mathrm{ol}(\mathbf A_S)\le\mathbb V\mathrm{ol}(\mathbf A_T)\,\mathbb V\mathrm{ol}(\mathbf A_{S\setminus T})$, all $S,T$"),
              ("b9", r"\exEqViaVq"), ("b10", r"\exEqViaSingles"), ("b11", r"\exEqViaPhi{} (Theorem~\exThmSummary)"),
-             ("ci", r"Corollary~\exCorExplicit(i)"), ("cii", r"Corollary~\exCorExplicit(ii), when $R\|\mathbf X\|_2\ge1$"),
+             ("ci", r"Corollary~\exCorExplicit(i)"), ("cii", r"Corollary~\exCorExplicit(ii), when $\alpha\|\mathbf X\|_2\ge1$"),
              ("ciii", r"Corollary~\exCorExplicit(iii)"), ("civ", r"Corollary~\exCorExplicit(iv)"),
              ("chain_Vq_le_prod", r"$\overline V_q\le\prod_{j\le q}v_{[j]}$"),
-             ("chain_Vq_le_Phi", r"$\overline V_q\le\Phi_r(R\mathbf X)$"),
+             ("chain_Vq_le_Phi", r"$\overline V_q\le\Phi_r(\alpha\mathbf X)$"),
              ("greedy", r"greedy guarantee $\mathbb V\mathrm{ol}(\mathbf A_G)\ge\overline V_k^{\,1-(1-1/k)^k}$")]
     lines = [r"\begin{tabular}{@{}l r r@{}}", r"\toprule", r"inequality & checks & largest violation\\", r"\midrule"]
     for key, lab in names:
@@ -252,14 +273,15 @@ def table_problems(D):
     R = D["results"]
     desc = {
         "trap": r"trap family, $k=8$, $\varepsilon=\tfrac12$, $\delta=10^{-2}$",
+        "kahan": r"block Kahan, $c=\tfrac14$",
         "devil": r"block devil's stairs",
         "pmeans": r"Perdig\~ao (i): $u,v,w,T_s$",
         "pturb": r"Perdig\~ao (ii): (i) and moments",
-        "pbayes": r"Perdig\~ao (iii): $[R\mathbf X;\mathbf I]$, $R=3$",
+        "pbayes": r"Perdig\~ao (iii): $[\alpha\mathbf X;\mathbf I]$, $\alpha=3$",
     }
     lines = [r"\begin{tabular}{@{}l r r r l@{}}", r"\toprule",
              r"problem & $m$ & $n$ & $b$ & $k$ enumerated\\", r"\midrule"]
-    for p in PROBS:
+    for p in ALL_PROBS:
         S = R[p]
         ex = S["exact_ks"]
         if len(ex) == len(S["ks"]):

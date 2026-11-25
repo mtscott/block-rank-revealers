@@ -52,14 +52,15 @@ TOL = 1e-8                      # natural-log tolerance for "same volume"
 GREEDY = "Block greedy (Alg. 2)"
 SHORT = {
     "Trap family (k=8, b=4)": "trap",
+    "Block Kahan (c=1/4)": "kahan",
     "Block devil's staircase": "devil",
     "Perdigão: mean wind + temperature": "pmeans",
     "Perdigão: wind, temperature + turbulence": "pturb",
-    "Perdigão: Bayesian D-optimal (R=3)": "pbayes",
+    "Perdigão: Bayesian D-optimal (alpha=3)": "pbayes",
 }
 
 
-PAPER_PROBLEMS = ("trap", "devil", "pmeans", "pturb", "pbayes")
+PAPER_PROBLEMS = ("trap", "kahan", "devil", "pmeans", "pturb", "pbayes")
 
 
 def log(*a):
@@ -94,7 +95,7 @@ def jsonable(o):
 # 1. the saved benchmark runs
 # ----------------------------------------------------------------------------
 
-def summarize_results(res):
+def summarize_results(res, tiebreaks=None):
     out = {}
     for p in res["problems"]:
         key = SHORT[p["name"]]
@@ -102,8 +103,14 @@ def summarize_results(res):
         meth = {nm: arr(m["logvol"]) for nm, m in p["methods"].items()}
         opt, worst = arr(p["ref"]["optimum"]), arr(p["ref"]["worst"])
         # best known = every method compared, including the best seed of each randomized
-        # method, and the exact optimum where enumerated
+        # method, the best tie-break of each tied method, and the exact optimum where enumerated
         his = [arr(m["hi"]) for m in p["methods"].values() if "hi" in m]
+        # methods whose first step is an exact tie (tiebreaks.py): the median over first picks
+        # stands for the method, as the median over seeds does for a randomized one
+        tbr = {nm: np.array(r, float) for nm, r in (tiebreaks or {}).get(key, {}).get("runs", {}).items()}
+        for nm, r in tbr.items():
+            meth[nm] = np.median(r, 0)
+            his.append(r.max(0))
         best = np.fmax(np.vstack(list(meth.values()) + his).max(0), opt)
         exact = ~np.isnan(opt)
         gaps = {nm: l10(best - v) for nm, v in meth.items()}
@@ -120,6 +127,11 @@ def summarize_results(res):
                 d["gap_worst_seed"] = l10(best - arr(m["lo"]))
                 d["gap_best_seed"] = l10(best - arr(m["hi"]))
                 d["max_gap_worst_seed"] = float(np.max(d["gap_worst_seed"]))
+            if nm in tbr:      # tied: range over first picks
+                d["gap_worst_tiebreak"] = l10(best - tbr[nm].min(0))
+                d["gap_best_tiebreak"] = l10(best - tbr[nm].max(0))
+                d["max_gap_worst_tiebreak"] = float(np.max(d["gap_worst_tiebreak"]))
+                d["n_tiebreaks"] = int(tbr[nm].shape[0])
             summ[nm] = d
         rnd = {q: l10(best - arr(p["ref"][f"random_{q}"])) for q in ("median", "p10", "p90")}
         same = {}
@@ -198,11 +210,12 @@ def build_problems(P1, P2):
     probs = {}
     X, good = P.trap_family(8, 4, 0.5, 1e-2)
     probs["trap"] = {"A": X, "b": 4, "K": 9, "good": good}
+    probs["kahan"] = {"A": P.block_kahan(16, 4, rows=256), "b": 4, "K": 15}
     probs["devil"] = {"A": P.block_devil_stairs(3000, 16, 4, rng=7), "b": 4, "K": 15}
     probs["pmeans"] = {"A": P1["A"], "b": 4, "K": 36}
     probs["pturb"] = {"A": P2["A"], "b": 8, "K": 36}
     Xw = P1["A"] / np.sqrt(P1["m"])
-    probs["pbayes"] = {"A": core.augment(Xw, 3.0), "b": 4, "K": 36, "X": Xw, "R": 3.0}
+    probs["pbayes"] = {"A": core.augment(Xw, 3.0), "b": 4, "K": 36, "X": Xw, "alpha": 3.0}
     for d in probs.values():
         d["R0"] = core.compress(d["A"])
         d["n"] = d["A"].shape[1] // d["b"]
@@ -263,14 +276,14 @@ def anti_greedy(R0, b, K, n):
     return np.array(vals), S
 
 
-def bounds_curves(X, R, b, ks, logVbar, logVbar_exact, logVq_exact_fn, v_sorted):
+def bounds_curves(X, alpha, b, ks, logVbar, logVbar_exact, logVq_exact_fn, v_sorted):
     """All lower bounds on log V_k (natural log), given (an underestimate of) log Vbar_k."""
-    s = np.linalg.svd(R * X, compute_uv=False)
+    s = np.linalg.svd(alpha * X, compute_uv=False)
     tolr = max(X.shape) * np.finfo(float).eps * s[0]
     rank = int(np.sum(s > tolr))
     lam = 0.5 * np.log1p(s[0] ** 2)                         # log Lambda
     logVolA = float(np.sum(0.5 * np.log1p(s ** 2)))
-    trc = float((R ** 2) * np.sum(X * X))
+    trc = float((alpha ** 2) * np.sum(X * X))
     n = X.shape[1] // b
     rows = []
     for i, k in enumerate(ks):
@@ -282,14 +295,14 @@ def bounds_curves(X, R, b, ks, logVbar, logVbar_exact, logVq_exact_fn, v_sorted)
                "b11": Vb - logPhi, "b10": Vb - float(np.sum(v_sorted[:q])),
                "ci": Vb - r * lam, "civ": Vb - logVolA,
                "ciii": Vb - 0.5 * r * np.log1p(trc / r) if r >= 1 else np.nan,
-               # s = sigma(R X), so s[0] = R ||X||_2 already (Corollary 2.1(ii))
+               # s = sigma(alpha X), so s[0] = alpha ||X||_2 already (Corollary 2.1(ii))
                "cii": (Vb - 0.5 * r * np.log(2) - r * np.log(s[0])) if s[0] >= 1 else np.nan,
                "b9": (Vb - logVq_exact_fn(q)) if logVq_exact_fn(q) is not None else np.nan,
                "greedy_guarantee": (1 - (1 - 1 / k) ** k) * Vb,
                "logPhi": logPhi}
         rows.append(row)
-    meta = {"rank_X": rank, "sigma1_RX": float(s[0]), "log_Lambda": lam, "logVolA": logVolA,
-            "R2_trace": trc, "R_normX": float(s[0])}
+    meta = {"rank_X": rank, "sigma1_alphaX": float(s[0]), "log_Lambda": lam, "logVolA": logVolA,
+            "alpha2_trace": trc, "alpha_normX": float(s[0])}
     return rows, meta
 
 
@@ -308,7 +321,7 @@ def bayes_bounds(probs, results):
             return 0.0
         i = ks.index(q) if q in ks else None
         return None if (i is None or not exact[i]) else float(opt[i])
-    rows, meta = bounds_curves(d["X"], d["R"], b, ks, logVbar, exact, Vq, v)
+    rows, meta = bounds_curves(d["X"], d["alpha"], b, ks, logVbar, exact, Vq, v)
     # worst: exact where enumerated, otherwise the anti-greedy volume (an upper estimate)
     wh, _ = anti_greedy(R0, b, max(ks), n)
     wh = wh[np.array(ks) - 1]
@@ -353,8 +366,8 @@ def verify_random(n_inst=300, seed=2026):
         scale = 10 ** rng.uniform(-1.5, 1.0, size=n)
         scale[rng.random(n) < 0.15] = 0.0                       # some uninformative blocks
         X = X * np.repeat(scale, b)[None, :]
-        R = float(10 ** rng.uniform(-1, 1.5))
-        A = core.augment(X, R)
+        alpha = float(10 ** rng.uniform(-1, 1.5))
+        A = core.augment(X, alpha)
         R0 = core.compress(A)
         shapes.append((m0, n, b))
         lv = {(): 0.0}
@@ -362,11 +375,11 @@ def verify_random(n_inst=300, seed=2026):
             for Sset in combinations(range(n), k):
                 lv[Sset] = core.log_vol_S(R0, Sset, b)
         vs = np.array(sorted((lv[(j,)] for j in range(n)), reverse=True))
-        s = np.linalg.svd(R * X, compute_uv=False)
+        s = np.linalg.svd(alpha * X, compute_uv=False)
         rank = int(np.sum(s > max(X.shape) * np.finfo(float).eps * max(s[0], 1e-300)))
         lam = 0.5 * np.log1p(s[0] ** 2)
         logVolA = float(np.sum(0.5 * np.log1p(s ** 2)))
-        trc = float(R ** 2 * np.sum(X * X))
+        trc = float(alpha ** 2 * np.sum(X * X))
         Vbar = {k: max(v for Sset, v in lv.items() if len(Sset) == k) for k in range(0, n + 1)}
         for k in range(1, n + 1):
             sets = [Sset for Sset in lv if len(Sset) == k]
@@ -386,7 +399,7 @@ def verify_random(n_inst=300, seed=2026):
             rec("b10", Vb - float(np.sum(vs[:q])), Vu)
             rec("b11", Vb - logPhi, Vu)
             rec("ci", Vb - r * lam, Vu)
-            if s[0] >= 1:                  # s[0] = R ||X||_2
+            if s[0] >= 1:                  # s[0] = alpha ||X||_2
                 rec("cii", Vb - 0.5 * r * np.log(2) - r * np.log(s[0]), Vu)
             if r >= 1:
                 rec("ciii", Vb - 0.5 * r * np.log1p(trc / r), Vu)
@@ -400,12 +413,12 @@ def verify_random(n_inst=300, seed=2026):
     for (k, b, rho) in [(2, 2, 3.0), (3, 1, 10.0), (2, 3, 0.5), (4, 2, 2.0)]:
         n = 2 * k
         m0 = k * b
-        R = 1.0
+        alpha = 1.0
         X = np.zeros((m0, n * b))
         X[:, : k * b] = rho * np.eye(m0)
-        R0 = core.compress(core.augment(X, R))
+        R0 = core.compress(core.augment(X, alpha))
         vals = [core.log_vol_S(R0, Sset, b) for Sset in combinations(range(n), k)]
-        s = np.linalg.svd(R * X, compute_uv=False)
+        s = np.linalg.svd(alpha * X, compute_uv=False)
         rr = min(b * min(k, n - k), int(np.sum(s > 1e-12)))
         logPhi = float(np.sum(0.5 * np.log1p(s[:rr] ** 2)))
         tight.append({"k": k, "b": b, "rho": rho, "gap": max(vals) - min(vals), "logPhi": logPhi,
@@ -637,6 +650,8 @@ def main():
     ap.add_argument("--npz", required=True)
     ap.add_argument("--results", default=str(ROOT / "results/benchmarks.json"))
     ap.add_argument("--out", default=str(ROOT / "results/analysis.json"))
+    ap.add_argument("--tiebreaks", default=str(ROOT / "results/tiebreaks.json"),
+                    help="tiebreaks.py output; the tied methods on Perdigão are reported over first picks")
     ap.add_argument("--skip", default="", help="comma list of sections to skip")
     ap.add_argument("--only", default="",
                     help="recompute only these sections (bounds,verify,alg2,sweeps,rr,sketch) "
@@ -652,7 +667,9 @@ def main():
     out = {"generated": time.strftime("%Y-%m-%d %H:%M:%S"), "numpy": np.__version__}
     import scipy
     out["scipy"] = scipy.__version__
-    results = summarize_results(res)
+    tb = json.load(open(args.tiebreaks)) if pathlib.Path(args.tiebreaks).exists() else None
+    out["tiebreaks"] = None if tb is None else tb.get("generated")
+    results = summarize_results(res, tb)
     for k in results:
         results[k]["methods_raw"] = raw[k]
     out["results"] = results

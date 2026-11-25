@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Figures of the experiments section, drawn from results/*.json.
 
-    python experiments/make_figures.py      # writes figures/*.pdf (+ .png previews)
+    python experiments/make_figures.py      # writes figures/*.png (+ vector .pdf copies)
 
-Static vector PDFs sized for elsarticle preprint 12pt (text width 390pt = 5.4in),
-set in Latin Modern so they match the paper's Computer Modern text.  Latin Modern
-ships only with CFF outlines, so the PDFs embed it as Type 3 (pdf.fonttype = 3);
-Type 42 would label CFF data as TrueType.
+PNGs at 600 dpi, which the paper includes, sized for elsarticle preprint 12pt (text
+width 390pt = 5.4in) and set in Latin Modern so they match the paper's Computer Modern
+text.  Each figure is also written as a vector PDF.  Latin Modern ships only with CFF
+outlines, so the PDFs embed it as Type 3 (pdf.fonttype = 3); Type 42 would label CFF
+data as TrueType.
 
 Colour follows the entity and never changes between figures:
   block greedy (= Algorithm 2) = blue, Businger-Golub / dgeqp3 = orange (solid /
@@ -26,6 +27,7 @@ import glob
 import json
 import math
 import pathlib
+import sys
 
 import matplotlib
 
@@ -36,11 +38,14 @@ from matplotlib import font_manager as fm  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 import matplotlib.patheffects as pe  # noqa: E402
+from PIL import Image  # noqa: E402  (a dependency of matplotlib)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BUILD = ROOT / "results"
 FIG = ROOT / "figures"
 FIG.mkdir(parents=True, exist_ok=True)
+sys.path.insert(0, str(ROOT))
+from blockrr.problems import kahan_shift_log10_ratio  # noqa: E402
 
 # Use Latin Modern Roman (the paper's font) when a TeX installation provides it, and
 # register only its 10pt optical size; otherwise matplotlib may pick a display size
@@ -74,6 +79,7 @@ TEXTWIDTH = 390 / 72.27          # inches, elsarticle preprint 12pt
 
 # ---------------------------------------------------------------- entities
 BLUE, ORANGE, MAGENTA, GREEN = "#2a78d6", "#eb6834", "#e87ba4", "#008300"
+VIOLET, RED = "#6250d6", "#e34948"
 BLUE_RAMP = ["#86b6ef", "#5598e7", "#2a78d6", "#184f95"]           # dataviz blue steps 250/350/450/600
 VIOLET_RAMP = ["#22185e", "#3d2f9c", "#5a4bc8", "#7c6fdc", "#9a90e6"]  # validated ordinal ramp
 GRAY, BAND = "#7a7974", "#e9e8e4"
@@ -85,6 +91,13 @@ STYLE = {   # label: (colour, marker, linestyle, filled, zorder)
     "CQRRPT": (MAGENTA, "v", (0, (4, 2)), False, 4),
     "sRRQR (Gu-Eisenstat)": (GREEN, "P", "-", True, 4),
     "Randomized sRRQR": (GREEN, "X", (0, (4, 2)), False, 4),
+    # pivoted *_M-QR; with M = DFT and DCT first-slice pivoting selects the same blocks,
+    # so "first_slice|DFT" stands for both (checked in _starm_coincide)
+    "first_slice|I": (VIOLET, "<", (0, (4, 2)), False, 6),
+    "first_slice|DFT": (VIOLET, "<", "-", True, 6),
+    "tube_norm|I": (RED, ">", (0, (4, 2)), False, 6),
+    "tube_norm|DFT": (RED, ">", "-", True, 6),
+    "tube_norm|DCT": (RED, "h", (0, (5, 1.5, 1, 1.5)), False, 6),
 }
 PLAIN = {
     "Block greedy (Alg. 2)": "block greedy (Alg. 1)",
@@ -94,6 +107,11 @@ PLAIN = {
     "CQRRPT": "CQRRPT (median)",
     "sRRQR (Gu-Eisenstat)": "sRRQR",
     "Randomized sRRQR": "randomized sRRQR (median)",
+    "first_slice|I": r"first-slice $\star_M$-QR, $M=I$",
+    "first_slice|DFT": r"first-slice $\star_M$-QR, $M$ = DFT, DCT",
+    "tube_norm|I": r"tube-norm $\star_M$-QR, $M=I$",
+    "tube_norm|DFT": r"tube-norm $\star_M$-QR, $M$ = DFT",
+    "tube_norm|DCT": r"tube-norm $\star_M$-QR, $M$ = DCT",
 }
 ORDER = list(STYLE)
 LN10 = math.log(10.0)
@@ -131,10 +149,21 @@ def load():
         return json.load(f)
 
 
+PNG_DPI = 600
+
+
 def save(fig, name):
-    fig.savefig(FIG / f"{name}.pdf")
-    fig.savefig(FIG / f"{name}.png", dpi=200)
+    # the PDF first: constrained layout is computed with the renderer of the first save
+    fig.savefig(FIG / f"{name}.pdf", metadata={"CreationDate": None})   # reproducible bytes
+    png = FIG / f"{name}.png"
+    fig.savefig(png, dpi=PNG_DPI)
     plt.close(fig)
+    # Agg writes RGBA; the background is opaque, so drop the alpha channel (pdfTeX would
+    # otherwise embed every figure with a soft mask)
+    with Image.open(png) as im:
+        assert im.mode == "RGBA" and im.getextrema()[3][0] == 255, f"{png} has transparent pixels"
+        rgb = im.convert("RGB")
+    rgb.save(png, dpi=(PNG_DPI, PNG_DPI), optimize=True)
 
 
 # ---------------------------------------------------------------- gap panels
@@ -171,44 +200,81 @@ def gap_panel(ax, S, title, *, every=1, ylim=None, shade_exact=False, methods=No
     return names
 
 
+def _starm_coincide(S):
+    """First-slice pivoting with M = DFT and with M = DCT selects the same blocks."""
+    m = S["methods"]
+    if "first_slice|DFT" in m:
+        assert np.allclose(A(m["first_slice|DFT"]["gap"]), A(m["first_slice|DCT"]["gap"]), atol=1e-12)
+
+
+def _kahan_natural_order(ax, S):
+    """Dashed: -log10 Vol(K_{2..k+1}) / Vol(K_{1..k}), the loss of blocks 1..k, which every
+    method that keeps the natural order incurs (closed form, c = 1/b as in run_benchmarks)."""
+    b = S["b"]
+    ks = list(S["ks"])
+    y = [-kahan_shift_log10_ratio(b, 1.0 / b, k) for k in ks]
+    ax.plot(ks, y, color=INK, lw=1.0, ls=(0, (3, 2)), zorder=30)
+    k0 = ks[min(10, len(ks) - 1)]
+    ax.annotate(r"$-\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{K}_{\{2,\dots,k+1\}})\,/\,"
+                r"\mathbb{V}\mathrm{ol}(\mathbf{K}_{\{1,\dots,k\}})$" "\n" r"(blocks $1,\dots,k$)",
+                xy=(k0, y[ks.index(k0)]), xytext=(1.25, -2.78), fontsize=6.5, color=INK,
+                ha="left", va="top", linespacing=1.5,
+                arrowprops=dict(arrowstyle="-", lw=0.6, color=INK, shrinkA=1, shrinkB=1.5,
+                                connectionstyle="arc3,rad=0.15"))
+
+
 def fig_toy(D):
     R = D["results"]
-    fig, axs = plt.subplots(1, 2, figsize=(TEXTWIDTH, 2.95), constrained_layout=True)
-    panels = [("trap", r"(a) $\lceil k/b\rceil$-trap family, $k=8$, $b=4$", (-13.2, 0.6)),
-              ("devil", r"(b) block devil's stairs, $b=4$", (-5.0, 0.25))]
+    fig, axs = plt.subplots(1, 2, figsize=(TEXTWIDTH, 3.35), constrained_layout=True)
+    panels = [("kahan", r"(a) block Kahan, $c=1/4$, $b=4$", (-3.45, 0.15)),
+              ("devil", r"(b) block devil's stairs, $b=4$", (-3.75, 0.15))]
     used = []
     for ax, (key, title, yl) in zip(axs.flat, panels):
-        used += gap_panel(ax, R[key], title, ylim=yl)
+        _starm_coincide(R[key])
+        used += gap_panel(ax, R[key], title, ylim=yl, random=False)
+        if key == "kahan":
+            _kahan_natural_order(ax, R[key])
         ks = R[key]["ks"]
         ax.set_xticks(ks if len(ks) <= 9 else ks[::2])
         ax.set_xlabel(r"number of selected blocks $k$")
     axs[0].set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_S)\,/\,\overline{V}_k$")
     names = [n for n in ORDER if n in set(used)]
-    fig.legend(handles=handles(names, seeds=True), loc="outside lower center", ncol=4,
-               handlelength=2.4, columnspacing=1.1)
+    fig.legend(handles=handles(names, random=False, seeds=True), loc="outside lower center", ncol=4,
+               handlelength=2.4, columnspacing=1.0, fontsize=7)
     save(fig, "fig_toy_gaps")
 
 
 def fig_perdigao(D):
+    """Methods whose first step ties (tiebreaks.py) are drawn as the median over first picks,
+    without a range; the randomized methods keep their seed ranges."""
     R = D["results"]
-    fig, axs = plt.subplots(1, 3, figsize=(TEXTWIDTH, 3.15), constrained_layout=True)
-    panels = [("pmeans", r"(a) $u,v,w,T_s$; $b=4$", (-10.5, 0.4)),
-              ("pturb", r"(b) $+$ second moments; $b=8$", (-13.5, 0.5)),
-              ("pbayes", r"(c) Bayesian, $R=3$; $b=4$", (-4.6, 0.2))]
+    fig, axs = plt.subplots(1, 3, figsize=(TEXTWIDTH, 3.6), constrained_layout=True)
+    panels = [("pmeans", r"(a) $u,v,w,T_s$; $b=4$", (-4.0, 0.2)),
+              ("pturb", r"(b) $+$ second moments; $b=8$", (-9.8, 0.3)),
+              ("pbayes", r"(c) Bayesian, $\alpha=3$; $b=4$", (-1.8, 0.08))]
     used = []
     for j, (key, title, yl) in enumerate(panels):
         ax = axs[j]
-        used += gap_panel(ax, R[key], title, every=5, ylim=yl, shade_exact=True)
+        _starm_coincide(R[key])
+        used += gap_panel(ax, R[key], title, every=5, ylim=yl, shade_exact=True, random=False)
         ax.set_xticks([1, 10, 20, 30, 36])
         ax.set_xlabel(r"towers selected $k$")
     axs[0].set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_S)\,/\,\widehat V_k$")
     names = [n for n in ORDER if n in set(used)]
-    fig.legend(handles=handles(names, seeds=True, exact_shade=True), loc="outside lower center",
-               ncol=4, handlelength=2.4, columnspacing=1.0)
+    tied = {nm for key, _, _ in panels for nm, m in R[key]["methods"].items() if "n_tiebreaks" in m}
+    hs = handles(names, random=False, seeds=True, exact_shade=True)
+    for h, nm in zip(hs, names):
+        if nm in tied:
+            h.set_label(PLAIN[nm] + " (median)")
+    fig.legend(handles=hs, loc="outside lower center", ncol=3, handlelength=2.4, columnspacing=1.0, fontsize=7)
     save(fig, "fig_perdigao_gaps")
 
 
 # ---------------------------------------------------------------- sharp limits
+
+SHARP_LEGEND = dict(fontsize=6.2, handlelength=1.7, handletextpad=0.5, borderaxespad=0.3,
+                    labelspacing=0.3)
+
 
 def _example_panel(ax, sw, title):
     fine = sw["example_2_1_fine"]
@@ -216,56 +282,31 @@ def _example_panel(ax, sw, title):
     for (a, c) in zip(("10", "100", "1000", "10000"), BLUE_RAMP):
         y = np.array([r[f"alpha={a}"] for r in fine])
         e = int(round(math.log10(int(a))))
-        ax.plot(d, y, color=c, lw=1.3, marker="o", ms=2.4, markevery=3, zorder=4)
+        ax.plot(d, y, color=c, lw=1.2, marker="o", ms=2.2, markevery=3, zorder=4)
         ax.axhline(sw["aug_floor_pred"][a], color=c, lw=0.7, ls=(0, (1, 1.4)), zorder=2)
-        ax.annotate(rf"$\alpha=10^{{{e}}}$", xy=(2.2e-8, sw["aug_floor_pred"][a]), xytext=(0, 2.5),
-                    textcoords="offset points", fontsize=7, color=INK2, va="bottom")
+        ax.annotate(rf"$\alpha=10^{{{e}}}$", xy=(1.3e-8, sw["aug_floor_pred"][a]), xytext=(0, 2.0),
+                    textcoords="offset points", fontsize=6.5, color=INK2, va="bottom")
     y = np.array([r["plain"] for r in fine])
-    ax.plot(d, y, color=INK, lw=1.3, marker="s", ms=2.4, markevery=3, zorder=5)
+    ax.plot(d, y, color=INK, lw=1.2, marker="s", ms=2.2, markevery=3, zorder=5)
     pred = np.array([r["predicted"] for r in fine])
     ax.plot(d, pred, color="white", lw=0.7, ls=(0, (2, 2)), zorder=6)
-    ax.annotate(r"$\mathbf{X}$ (no prior)", xy=(1.3e-7, -7.55), fontsize=7, color=INK)
+    ax.annotate(r"$\mathbf{X}$ (no prior)", xy=(1.0e-8, -4.6), fontsize=6.5, color=INK)
     ax.set_xscale("log")
     ax.set_xlim(7e-9, 0.45)
     ax.set_ylim(-8.3, 0.25)
     ax.set_title(title)
-    ax.legend(handles=[Line2D([], [], color=INK2, lw=1.2, marker="o", ms=2.6, label="computed"),
-                       Line2D([], [], color=INK2, lw=0.7, ls=(0, (1, 1.4)), label=r"limit $\delta\to0$ (closed form)"),
-                       Line2D([], [], color=INK, lw=0.8, ls=(0, (2, 2)), label=r"$\delta\sqrt{1+\delta^2}/\sqrt{1-\varepsilon^2}$")],
-              loc="lower right", fontsize=6.6, handlelength=2.0)
+    ax.legend(handles=[Line2D([], [], color=INK2, lw=1.2, marker="o", ms=2.4, label="computed"),
+                       Line2D([], [], color=INK2, lw=0.7, ls=(0, (1, 1.4)), label=r"limit $\rho(\alpha)$"),
+                       Line2D([], [], color=INK, lw=0.8, ls=(0, (2, 2)), label="closed form")],
+              loc="lower right", **SHARP_LEGEND)
 
 
-def _sketch_panel(ax, S, gname, title, legend=None):
-    curves = S["curves"]
-    for case, c in (("X", INK), ("10", BLUE_RAMP[0]), ("100", BLUE_RAMP[1]),
-                    ("1000", BLUE_RAMP[2]), ("10000", BLUE_RAMP[3])):
-        rows = curves[f"{gname}|{case}"]
-        d = np.array([r["delta"] for r in rows])
-        ax.plot(d, [r["unsketched"] for r in rows], color=c, lw=0.7, ls=(0, (1, 1.4)), zorder=2)
-        ax.plot(d, [r["mean"] for r in rows], color=c, lw=1.3, marker="s" if case == "X" else "o",
-                ms=2.4, markevery=3, zorder=4)
-    ax.set_xscale("log")
-    ax.set_xlim(7e-9, 0.45)
-    ax.set_ylim(-8.3, 0.25)
-    ax.set_title(title)
-    if legend == "style":
-        ax.legend(handles=[Line2D([], [], color=INK2, lw=1.2, marker="o", ms=2.6,
-                                  label=f"mean over {S['seeds']} sketches"),
-                           Line2D([], [], color=INK2, lw=0.7, ls=(0, (1, 1.4)), label="without sketch, as in (b)")],
-                  loc="lower right", fontsize=6.6, handlelength=2.0)
-    elif legend == "colour":
-        hs = [Line2D([], [], color=INK, lw=1.3, marker="s", ms=2.6, label=r"$\mathbf{X}$ (no prior)")]
-        hs += [Line2D([], [], color=c, lw=1.3, marker="o", ms=2.6, label=rf"$\alpha=10^{{{e}}}$")
-               for e, c in zip((1, 2, 3, 4), BLUE_RAMP)]
-        ax.legend(handles=hs, loc="lower right", fontsize=6.6, handlelength=2.0, ncol=1)
-
-
-def fig_sharp(D, TS):
+def fig_sharp(D):
+    """One row: (a) the trap family, (b) Example 2.1 with and without the prior."""
     sw = D["sweeps"]
-    S = TS["sketch_example"]
-    fig, axs = plt.subplots(2, 2, figsize=(TEXTWIDTH, 5.0), constrained_layout=True)
+    fig, axs = plt.subplots(1, 2, figsize=(TEXTWIDTH, 2.3), constrained_layout=True)
 
-    ax = axs[0, 0]
+    ax = axs[0]
     rows = [r for r in sw["trap"] if r.get("summary")]
     expo_colour = {1: BLUE_RAMP[0], 2: BLUE_RAMP[1], 4: BLUE_RAMP[2], 6: BLUE_RAMP[3]}
     markers = {(2, 2): "o", (3, 3): "o", (4, 2): "s", (5, 2): "D", (6, 3): "o", (8, 4): "o"}
@@ -274,99 +315,32 @@ def fig_sharp(D, TS):
         pts = [r for r in sw["trap"] if not r.get("summary") and r["k"] == k and r["b"] == b]
         x = np.array([r["delta"] for r in pts]); y = np.array([r["log10_ratio"] for r in pts])
         c = expo_colour[s["predicted_slope"]]
-        ax.plot(x, y, color=c, lw=1.2, marker=markers[(k, b)], ms=2.8, mfc=c, mec=c,
-                label=rf"$k={k},\ b={b}$: {s['fitted_slope']:.2f}")
+        ax.plot(x, y, color=c, lw=1.1, marker=markers[(k, b)], ms=2.4, mfc=c, mec=c,
+                label=rf"$({k},{b})$: {s['fitted_slope']:.2f}")
     ax.set_xscale("log")
-    ax.set_title(r"(a) $\lceil k/b\rceil$-trap family, $\varepsilon=1/2$")
-    ax.legend(loc="lower right", handlelength=1.8, fontsize=6.6,
-              title=r"fitted slope ($=k-\lceil k/b\rceil$)", title_fontsize=6.6)
+    ax.set_xticks([1e-6, 1e-4, 1e-2])
+    ax.set_ylim(-41, 1.5)
+    ax.set_title(r"(a) $\lceil k/b\rceil$-trap family")
+    ax.legend(loc="lower right", title=r"$(k,b)$: slope", title_fontsize=6.2, **SHARP_LEGEND)
     ax.set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_{G})\,/\,\overline{V}_k$")
 
-    _example_panel(axs[0, 1], sw, r"(b) $6\times6$ example: $\mathbf{X}$ and $[\alpha\mathbf{X};\mathbf{I}]$")
-    d1, d2 = S["sizes"]["1.25"], S["sizes"]["2.0"]
-    _sketch_panel(axs[1, 0], S, "1.25", rf"(c) greedy on $\mathbf{{\Omega A}}$, $d=\lceil 1.25N\rceil={d1}$", legend="style")
-    _sketch_panel(axs[1, 1], S, "2.0", rf"(d) greedy on $\mathbf{{\Omega A}}$, $d=2N={d2}$", legend="colour")
-    for ax in (axs[0, 1], axs[1, 0], axs[1, 1]):
+    _example_panel(axs[1], sw, r"(b) $\mathbf{X}$ and $[\alpha\mathbf{X};\mathbf{I}]$")
+    axs[1].set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_{G})\,/\,\overline{V}_2$")
+    for ax in axs:
         ax.set_xlabel(r"$\delta$")
-    axs[0, 0].set_xlabel(r"$\delta$")
-    for ax in (axs[1, 0],):
-        ax.set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_{G})\,/\,\overline{V}_2$")
-    axs[0, 1].set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_{G})\,/\,\overline{V}_2$")
+    axs[1].set_xticks([1e-8, 1e-6, 1e-4, 1e-2])
     save(fig, "fig_sharp_limits")
 
 
 # ---------------------------------------------------------------- tensor methods
 
-VIOLET, RED = "#6250d6", "#e34948"
-TSTYLE = {  # key: (label, colour, marker, linestyle, filled, zorder)
-    "Alg. 2 (a)": ("Alg. 1 = Alg. 2 (a), (b), (c)", BLUE, "o", "-", True, 9),
-    "dgeqp3": ("dgeqp3 (column)", ORANGE, "s", (0, (4, 2)), False, 5),
-    "first_slice|DFT": (r"first-slice $\star_M$-QR, $M$ = DFT, DCT, Haar", VIOLET, "<", "-", True, 8),
-    "first_slice|I": (r"first-slice $\star_M$-QR, $M=I$", VIOLET, "<", (0, (4, 2)), False, 6),
-    "tube_norm|DFT": (r"tube-norm $\star_M$-QR, $M$ = DFT", RED, ">", "-", True, 7),
-    "tube_norm|DCT": (r"tube-norm $\star_M$-QR, $M$ = DCT", RED, "h", (0, (5, 1.5, 1, 1.5)), False, 7),
-    "tube_norm|I": (r"tube-norm $\star_M$-QR, $M=I$", RED, ">", (0, (4, 2)), False, 7),
-}
-SKETCH_KEY = {"Alg. 2 (a)": "Alg. 1"}       # on a sketch, Alg. 1 stands for Alg. 2 (a)-(c)
-
-
-def fig_tensor(D, TS):
-    """Rows: on A, on Omega A with d = ceil(1.25 N), on Omega A with d = 2N (mean over
-    sketches, each selection evaluated on A).  Columns: trap family, devil's stairs."""
-    R = D["results"]
-    TK = TS["tensor_sketch"]
-    fig, axs = plt.subplots(3, 2, figsize=(TEXTWIDTH, 6.1), constrained_layout=True, sharex="col")
-    probs = (("trap", r"trap family", (-13.2, 0.6)), ("devil", r"devil's stairs", (-4.2, 0.25)))
-    rows = (None, "1.25", "2.0")
-    letters = iter("abcdef")
-    for r, gname in enumerate(rows):
-        for c, (key, pname, yl) in enumerate(probs):
-            ax = axs[r, c]
-            S = R[key]
-            ks = np.array(S["ks"])
-            tm = TS["tensor"][key]["methods"]
-            ax.fill_between(ks, -A(S["random"]["p90"]), -A(S["random"]["p10"]), color=BAND, lw=0, zorder=0)
-            ax.plot(ks, -A(S["random"]["median"]), color=GRAY, lw=1.0, ls=(0, (1, 1.4)), zorder=1)
-            if gname is not None:
-                st = TK[key]["by_size"][gname]["stats"]
-            for i, (nm, (lab, col, mk, ls, filled, z)) in enumerate(TSTYLE.items()):
-                if gname is None:
-                    y = -A(tm[nm]["gap"]) if nm in tm else -A(S["methods"][nm]["gap"])
-                else:
-                    y = -A(st[SKETCH_KEY.get(nm, nm)]["mean_by_k"])
-                ax.plot(ks, y, color=col, ls=ls, lw=1.25, marker=mk, ms=3.2, mew=0.85,
-                        mfc=col if filled else "white", mec=col, zorder=z,
-                        markevery=(i % 2, 2) if len(ks) > 10 else 1)
-            ax.axhline(0, color=INK, lw=0.6, zorder=3)
-            L = next(letters)
-            if gname is None:
-                ax.set_title(rf"({L}) {pname}, on $\mathbf{{A}}$")
-            else:
-                d = TK[key]["by_size"][gname]["d"]
-                rule = r"\lceil 1.25N\rceil" if gname == "1.25" else "2N"
-                ax.set_title(rf"({L}) {pname}, on $\mathbf{{\Omega A}}$, $d={rule}={d}$")
-            ax.set_xlim(ks[0] - 0.5, ks[-1] + 0.5)
-            ax.set_ylim(*yl)
-            ax.set_xticks(ks if len(ks) <= 9 else ks[::2])
-            if r == len(rows) - 1:
-                ax.set_xlabel(r"number of selected blocks $k$")
-        axs[r, 0].set_ylabel(r"$\log_{10}\,\mathbb{V}\mathrm{ol}(\mathbf{A}_S)\,/\,\overline{V}_k$")
-    hs = [Line2D([], [], color=c, ls=ls, lw=1.25, marker=mk, ms=4, mew=0.85, mfc=c if f else "white",
-                 mec=c, label=lab) for (lab, c, mk, ls, f, z) in TSTYLE.values()]
-    hs.append(Line2D([], [], color=GRAY, lw=1.0, ls=(0, (1, 1.4)), label="random $k$-set (median)"))
-    hs.append(Patch(facecolor=BAND, edgecolor="none", label="random $k$-set (10–90%)"))
-    fig.legend(handles=hs, loc="outside lower center", ncol=3, fontsize=6.8, handlelength=2.4, columnspacing=1.0)
-    save(fig, "fig_tensor_methods")
-
-
 # ---------------------------------------------------------------- bounds
 
-BOUNDS = [  # key, label, colour, linestyle
-    ("b9", r"(9)", VIOLET_RAMP[0], "-"),
-    ("b10", r"(10)", VIOLET_RAMP[1], (0, (6, 1.5))),
-    ("b11", r"(11), Thm 5.2", VIOLET_RAMP[2], (0, (3, 1.5))),
-    ("ciii", r"Cor. 5.1(iii)", VIOLET_RAMP[3], (0, (1.5, 1.5))),
-    ("ci", r"Cor. 5.1(i)", VIOLET_RAMP[4], (0, (5, 1.5, 1, 1.5))),
+BOUNDS = [  # key, label, colour, linestyle; numbering of Theorem 2.5 in the manuscript
+    ("b9", r"(11)", VIOLET_RAMP[0], "-"),                                  # Vbar_k / Vbar_q
+    ("b10", r"(12)", VIOLET_RAMP[1], (0, (6, 1.5))),                        # Vbar_k / prod v_[j]
+    ("b11", r"(13), $\overline{V}_k/\Phi_r(\alpha\mathbf{X})$", VIOLET_RAMP[2], (0, (3, 1.5))),
+    ("ci", r"(13), $\Lambda^{-r}\,\overline{V}_k$", VIOLET_RAMP[4], (0, (5, 1.5, 1, 1.5))),
 ]
 
 
@@ -399,19 +373,20 @@ def fig_bounds(D):
     axs[1].set_xticks([24, 27, 30, 33, 36])
     axs[0].set_xticks([1, 10, 20, 30, 36])
     axs[0].set_ylabel(r"$\log_{10}$ volume")
-    axs[0].set_title(r"(a) Perdigão, Bayesian problem ($R=3$, $n=37$)")
+    axs[0].set_title(r"(a) Perdigão, Bayesian problem ($\alpha=3$, $n=37$)")
     axs[1].set_title(r"(b) detail, $k>n/2$")
     hs = [Line2D([], [], color=INK, lw=1.2, label=r"$\widehat V_k$ (best known)"),
           Line2D([], [], color=STYLE["Block greedy (Alg. 2)"][0], lw=1.25, marker="o", ms=3.4,
                  label="block greedy"),
-          Line2D([], [], color=BLUE, lw=0.9, ls=(0, (5, 2)), label=r"greedy guarantee $\overline{V}_k^{\,1-(1-1/k)^k}$"),
+          Line2D([], [], color=BLUE, lw=0.9, ls=(0, (5, 2)),
+                 label=r"greedy guarantee $\overline{V}_k^{\,1-(1-1/k)^k}$, Thm 2.7"),
           Line2D([], [], color=GRAY, lw=1.0, ls=(0, (1, 1.4)), label="random $k$-set (median)"),
           Line2D([], [], color=INK, lw=0.9, ls=(0, (3, 1.5)), label=r"anti-greedy ($\geq\underline{V}_k$)"),
           Line2D([], [], color=INK, ls="none", marker="x", ms=4, label=r"$\underline{V}_k$ enumerated")]
     for key, lab, c, ls in BOUNDS:
         if key == "b9":
             hs.append(Line2D([], [], ls="none", marker="o", ms=3.2, mfc="white", mec=c, mew=1.0,
-                             label=r"bound (9) on $\underline{V}_k$"))
+                             label=r"bound (11) on $\underline{V}_k$"))
         else:
             hs.append(Line2D([], [], color=c, lw=1.15, ls=ls, label=f"bound {lab}"))
     fig.legend(handles=hs, loc="outside lower center", ncol=4, fontsize=6.8, handlelength=2.4,
@@ -465,10 +440,7 @@ def fig_map(D):
 
 def main():
     D = load()
-    with open(BUILD / "tensor_sketch.json") as f:
-        TS = json.load(f)
-    fig_sharp(D, TS)
-    fig_tensor(D, TS)
+    fig_sharp(D)
     fig_toy(D)
     fig_perdigao(D)
     fig_bounds(D)
